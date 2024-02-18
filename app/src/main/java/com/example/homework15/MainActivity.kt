@@ -3,169 +3,105 @@ package com.example.homework15
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.os.Handler
-import android.os.Looper
-import android.widget.ImageView
-import android.widget.TextView
-import androidx.constraintlayout.widget.ConstraintLayout
-import io.reactivex.android.schedulers.AndroidSchedulers
-import io.reactivex.schedulers.Schedulers
+import android.widget.Toast
+import androidx.activity.viewModels
+import com.example.homework15.databinding.ActivityMainBinding
+import dagger.hilt.android.AndroidEntryPoint
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
-
+@AndroidEntryPoint
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var handler: Handler
-    private lateinit var runnable: Runnable
+    private lateinit var binding: ActivityMainBinding
 
+    private val viewModel: WeatherViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
 
-        val card: ConstraintLayout = findViewById(R.id.linearLayout)
-        val currentDate: TextView = findViewById(R.id.date)
-        val currentTime: TextView = findViewById(R.id.time)
-        val wmoCode: TextView = findViewById(R.id.wmo_code)
-        val currentWeather: TextView = findViewById(R.id.currentWeather)
-        val feelsLike: TextView = findViewById(R.id.feels_like)
-        val humidity: TextView = findViewById(R.id.humidity)
-        val wind: TextView = findViewById(R.id.wind)
-        val weatherUpdatedTime: TextView = findViewById(R.id.weatherUpdatedTime)
-        val currentWeatherPicture: ImageView = findViewById(R.id.photo)
-        val nameOfDay1: TextView = findViewById(R.id.day1)
-        val nameOfDay2: TextView = findViewById(R.id.day2)
-        val nameOfDay3: TextView = findViewById(R.id.day3)
-        val weatherPictureOfDay1: ImageView = findViewById(R.id.photo_day1)
-        val weatherPictureOfDay2: ImageView = findViewById(R.id.photo_day2)
-        val weatherPictureOfDay3: ImageView = findViewById(R.id.photo_day3)
-        val highTempOfDay1: TextView = findViewById(R.id.high_temp_day1)
-        val highTempOfDay2: TextView = findViewById(R.id.high_temp_day2)
-        val highTempOfDay3: TextView = findViewById(R.id.high_temp_day3)
-        val lowTempOfDay1: TextView = findViewById(R.id.low_temp_day1)
-        val lowTempOfDay2: TextView = findViewById(R.id.low_temp_day2)
-        val lowTempOfDay3: TextView = findViewById(R.id.low_temp_day3)
+        observeViewModel()
+        updateCurrentTimeEverySecond()
 
+        binding.linearLayout.setOnClickListener {
+            viewModel.refreshWeather()
+        }
 
-        handler = Handler(Looper.getMainLooper())
-        runnable = object : Runnable {
+    }
+
+    private fun observeViewModel() {
+        viewModel.weatherState.observe(this) { state ->
+            when (state) {
+                is WeatherState.Success -> updateUI(state.data.body())
+                is WeatherState.Error -> showError(state.message)
+            }
+        }
+    }
+
+    private fun updateUI(weatherResponse: WeatherResponse?) {
+        weatherResponse?.let {
+            val formattedDateTime = formatUnixTime(it.current.time)
+            binding.date.text = formattedDateTime.date
+            "Weather updated time: ${formattedDateTime.time}".also {
+                binding.weatherUpdatedTime.text = it
+            }
+            getWeatherDescription(it.current.weatherCode).also { binding.wmoCode.text = it }
+            "${roundWeatherData(it.current.temperature2m)}°".also {
+                binding.currentWeather.text = it
+            }
+            "Feels like : ${roundWeatherData(it.current.apparentTemperature)}°".also {
+                binding.feelsLike.text = it
+            }
+            "Humidity: ${roundWeatherData(it.current.relativeHumidity2m)}%".also {
+                binding.humidity.text = it
+            }
+            "Wind: ${roundWeatherData(it.current.windSpeed10m)} m/s".also { binding.wind.text = it }
+            val (today, tomorrow, dayAfterTomorrow) = getDaysNames()
+            binding.day1.text = today
+            binding.day2.text = tomorrow
+            binding.day3.text = dayAfterTomorrow
+            "Hi ${roundWeatherData(it.daily.temperature2mMax[0])}°C".also {
+                binding.highTempDay1.text = it
+            }
+            "Hi ${roundWeatherData(it.daily.temperature2mMax[1])}°C".also {
+                binding.highTempDay2.text = it
+            }
+            "Hi ${roundWeatherData(it.daily.temperature2mMax[2])}°C".also {
+                binding.highTempDay3.text = it
+            }
+            "Lo ${roundWeatherData(it.daily.temperature2mMin[0])}°C".also {
+                binding.lowTempDay1.text = it
+            }
+            "Lo ${roundWeatherData(it.daily.temperature2mMin[1])}°C".also {
+                binding.lowTempDay2.text = it
+            }
+            "Lo ${roundWeatherData(it.daily.temperature2mMin[2])}°C".also {
+                binding.lowTempDay3.text = it
+            }
+            binding.photo.setImageResource(getWeatherPicture(it.current.weatherCode))
+            binding.photoDay1.setImageResource(getWeatherPicture(it.daily.weatherCode[0]))
+            binding.photoDay2.setImageResource(getWeatherPicture(it.daily.weatherCode[1]))
+            binding.photoDay3.setImageResource(getWeatherPicture(it.daily.weatherCode[2]))
+        }
+    }
+
+    private fun showError(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun updateCurrentTimeEverySecond() {
+        val handler = Handler(mainLooper)
+        val runnable = object : Runnable {
             override fun run() {
-                val currentTimeFormatted = getCurrentTimeFormatted()
-                currentTime.text = currentTimeFormatted
+                binding.time.text = getCurrentTimeFormatted()
                 handler.postDelayed(this, 1000)
             }
         }
-        handler.post(runnable)
-
-        val apiClient = ApiClient.client.create(ApiInterface::class.java)
-
-        apiClient.getWeatherForKyivRx()
-            .subscribeOn(Schedulers.io())
-            .observeOn(AndroidSchedulers.mainThread())
-            .subscribe({
-                val formattedDateTime = formatUnixTime(it.current.time)
-                currentDate.text = formattedDateTime.date
-                weatherUpdatedTime.text = "Weather updated time: ${formattedDateTime.time}"
-                wmoCode.text = "${getWeatherDescription(it.current.weatherCode)}"
-                currentWeather.text = "${roundWeatherData(it.current.temperature2m)}°"
-                feelsLike.text =
-                    "Feels like : ${roundWeatherData(it.current.apparentTemperature)}°"
-                humidity.text = "Humidity: ${roundWeatherData(it.current.relativeHumidity2m)}%"
-                wind.text = "Wind: ${roundWeatherData(it.current.windSpeed10m)} m/s"
-                val (today, tomorrow, dayAfterTomorrow) = getDaysNames()
-                nameOfDay1.text = "$today"
-                nameOfDay2.text = "$tomorrow"
-                nameOfDay3.text = "$dayAfterTomorrow"
-                highTempOfDay1.text = "Hi ${roundWeatherData(it.daily.temperature2mMax[0])}°C"
-                highTempOfDay2.text = "Hi ${roundWeatherData(it.daily.temperature2mMax[1])}°C"
-                highTempOfDay3.text = "Hi ${roundWeatherData(it.daily.temperature2mMax[2])}°C"
-                lowTempOfDay1.text = "Lo ${roundWeatherData(it.daily.temperature2mMin[0])}°C"
-                lowTempOfDay2.text = "Lo ${roundWeatherData(it.daily.temperature2mMin[1])}°C"
-                lowTempOfDay3.text = "Lo ${roundWeatherData(it.daily.temperature2mMin[2])}°C"
-                currentWeatherPicture.setImageResource(getWeatherPicture(it.current.weatherCode))
-                weatherPictureOfDay1.setImageResource(getWeatherPicture(it.daily.weatherCode[0]))
-                weatherPictureOfDay2.setImageResource(getWeatherPicture(it.daily.weatherCode[1]))
-                weatherPictureOfDay3.setImageResource(getWeatherPicture(it.daily.weatherCode[2]))
-            }, {
-                wmoCode.text = "${it.message}"
-                currentDate.text = "${it.message}"
-                currentTime.text = "${it.message}"
-                currentWeather.text = "${it.message}"
-                feelsLike.text = "${it.message}"
-                humidity.text = "${it.message}"
-                wind.text = "${it.message}"
-                nameOfDay1.text = "${it.message}"
-                nameOfDay2.text = "${it.message}"
-                nameOfDay3.text = "${it.message}"
-                highTempOfDay1.text = "${it.message}"
-                highTempOfDay2.text = "${it.message}"
-                highTempOfDay3.text = "${it.message}"
-                lowTempOfDay1.text = "${it.message}"
-                lowTempOfDay2.text = "${it.message}"
-                lowTempOfDay3.text = "${it.message}"
-            })
-
-        card.setOnClickListener {
-            apiClient.getWeatherForKyivRx()
-                .subscribeOn(Schedulers.io())
-                .observeOn(AndroidSchedulers.mainThread())
-                .subscribe({
-                    val formattedDateTime = formatUnixTime(it.current.time)
-                    currentDate.text = formattedDateTime.date
-                    weatherUpdatedTime.text = "Weather updated time: ${formattedDateTime.time}"
-                    currentTime.text = getCurrentTimeFormatted()
-                    wmoCode.text = "${getWeatherDescription(it.current.weatherCode)}"
-                    currentWeather.text = "${roundWeatherData(it.current.temperature2m)}°"
-                    feelsLike.text =
-                        "Feels like : ${roundWeatherData(it.current.apparentTemperature)}°"
-                    humidity.text = "Humidity: ${roundWeatherData(it.current.relativeHumidity2m)}%"
-                    wind.text = "Wind: ${roundWeatherData(it.current.windSpeed10m)} m/s"
-                    val (today, tomorrow, dayAfterTomorrow) = getDaysNames()
-                    nameOfDay1.text = "$today"
-                    nameOfDay2.text = "$tomorrow"
-                    nameOfDay3.text = "$dayAfterTomorrow"
-                    highTempOfDay1.text = "Hi ${roundWeatherData(it.daily.temperature2mMax[0])}°C"
-                    highTempOfDay2.text = "Hi ${roundWeatherData(it.daily.temperature2mMax[1])}°C"
-                    highTempOfDay3.text = "Hi ${roundWeatherData(it.daily.temperature2mMax[2])}°C"
-                    lowTempOfDay1.text = "Lo ${roundWeatherData(it.daily.temperature2mMin[0])}°C"
-                    lowTempOfDay2.text = "Lo ${roundWeatherData(it.daily.temperature2mMin[1])}°C"
-                    lowTempOfDay3.text = "Lo ${roundWeatherData(it.daily.temperature2mMin[2])}°C"
-                    currentWeatherPicture.setImageResource(getWeatherPicture(it.current.weatherCode))
-                    weatherPictureOfDay1.setImageResource(getWeatherPicture(it.daily.weatherCode[0]))
-                    weatherPictureOfDay2.setImageResource(getWeatherPicture(it.daily.weatherCode[1]))
-                    weatherPictureOfDay3.setImageResource(getWeatherPicture(it.daily.weatherCode[2]))
-                }, {
-                    wmoCode.text = "${it.message}"
-                    currentDate.text = "${it.message}"
-                    currentTime.text = "${it.message}"
-                    currentWeather.text = "${it.message}"
-                    feelsLike.text = "${it.message}"
-                    humidity.text = "${it.message}"
-                    wind.text = "${it.message}"
-                    nameOfDay1.text = "${it.message}"
-                    nameOfDay2.text = "${it.message}"
-                    nameOfDay3.text = "${it.message}"
-                    highTempOfDay1.text = "${it.message}"
-                    highTempOfDay2.text = "${it.message}"
-                    highTempOfDay3.text = "${it.message}"
-                    lowTempOfDay1.text = "${it.message}"
-                    lowTempOfDay2.text = "${it.message}"
-                    lowTempOfDay3.text = "${it.message}"
-                })
-        }
-
-    }
-
-    override fun onResume() {
-        super.onResume()
-        handler.post(runnable)
-    }
-
-    override fun onPause() {
-        handler.removeCallbacks(runnable)
-        super.onPause()
+        handler.postDelayed(runnable, 10)
     }
 
     fun getWeatherDescription(codeStr: String): String {
@@ -214,15 +150,11 @@ class MainActivity : AppCompatActivity() {
 
     fun formatUnixTime(unixTimeStr: String): FormattedDateTime {
         val unixTime = unixTimeStr.toLong()
-
         val date = Date(unixTime * 1000)
-
         val timeFormat = SimpleDateFormat("HH:mm", Locale.ENGLISH)
         val timeString = timeFormat.format(date)
-
         val dateFormat = SimpleDateFormat("MMM-dd-yyyy EEE", Locale.ENGLISH)
         val dateString = dateFormat.format(date)
-
         return FormattedDateTime(timeString, dateString)
     }
 
@@ -255,5 +187,3 @@ class MainActivity : AppCompatActivity() {
         return roundedData.toInt().toString()
     }
 }
-
-
